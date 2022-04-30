@@ -65,7 +65,7 @@ def extractDomainOSM(bbox,res,bldH):
         xxx.append(int(np.round((bm.selectRegion(aa)[i][0] - x_min)*x_mul)))
         yyy.append(int(np.round((bm.selectRegion(aa)[i][1] - y_min)*y_mul)))
 
-    domain = np.zeros([np.max(xxx)-np.min(xxx)+5,np.max(yyy)-np.min(yyy)+5]) # larger domain to contain the geometry
+    domain = np.zeros([np.max(xxx)-np.min(xxx),np.max(yyy)-np.min(yyy)]) 
     Gx = math.ceil(dist_x)
     Gy = math.ceil(dist_y)
     lineO = []
@@ -91,16 +91,24 @@ def extractDomainOSM(bbox,res,bldH):
             ymin = np.min(ny) - np.min(yyy)
             ymax = np.max(ny) - np.min(yyy)
 
-            for ii in range(np.size(nx)):
+        # Construct edge
+        for ii in range(np.size(nx)):
+            try:
                 domain[nx[ii]-np.min(xxx),ny[ii]-np.min(yyy)] = bldH # Fill the outline with building height
-                
-            pol = Polygon(Pol)
-            area.append(pol.area)
-            for x in range (xmin,xmax):
-                for y in range(ymin,ymax):
-                    p = Point(x,y)
-                    if p.within(pol) or p.intersects(pol):
+            except:
+                continue
+
+        pol = Polygon(Pol)
+        area.append(pol.area)
+        # Construct interior by filling grids with building height
+        for x in range (xmin,xmax):
+            for y in range(ymin,ymax):
+                p = Point(x,y)
+                if p.within(pol) or p.intersects(pol):
+                    try:
                         domain[x,y] = bldH  # Fill inside with building height
+                    except:
+                        continue
 
             for q in range(np.shape(xy)[0]-1):
                 lineO.append(np.rad2deg(np.arctan((xy[q][1]-xy[q+1][1])/(xy[q][0]-xy[q+1][0]+1e-10))))
