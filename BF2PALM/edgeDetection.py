@@ -15,6 +15,8 @@ def pressureDefT(topo):
                 except:
                     0  
         return(pfNN,pbNN)
+
+        
     topo = np.transpose(topo)
     pfNN,pbNN = pressureDefPre(topo)
     

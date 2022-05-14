@@ -1,6 +1,9 @@
 import numpy as np
 import re
+import math
 
+
+names = globals()
 
 def Parse_GE(bbox):
     """
@@ -26,8 +29,6 @@ def Parse_GE(bbox):
  
     return multiplier * sum(float(x) / 60 ** n for n, x in enumerate(re.split('°|\'|\"', bbox[:-2])))
 
-
-
 def cal_WGSdist(Gx1,Gx2,Gy1,Gy2): 
     '''
     Calculate real distance of two points with longitude and latitude
@@ -46,8 +47,6 @@ def cal_WGSdist(Gx1,Gx2,Gy1,Gy2):
     
     dist = R*c*1000 # distance in m
     return(dist)
-
-
 
 def shear(angle,x,y):
     
@@ -88,7 +87,7 @@ def shear(angle,x,y):
 
 
 
-def rotate(tmp,angle):
+def rotate(image,angle):
     """
     Rasterize 
     
@@ -108,7 +107,6 @@ def rotate(tmp,angle):
         True if the tags are for a polygon type geometry
         
     """
-    image = tmp             # Load the image
     angle=angle               # Ask the user to enter the angle of rotation
 
     # Define the most occuring variables
@@ -188,8 +186,6 @@ def select_region(bbox):
     return(bbox_osm,bbox_osm_)
 
 
-
-
 def projection(bbox_cor,resx,resy):
     
     """
@@ -237,3 +233,209 @@ def centroid(vertexes):
     
     return(x, y)  
 
+
+def noHoles(domain,ths):
+    """
+    Eliminate small and unconnected air space -- ths ~ 3
+
+    """
+    # 1 1 1
+    # 1 x 1
+    # 1 1 1
+    tmp = domain
+    ori = np.zeros(domain.shape)
+    for i in range(domain.shape[0]-1):
+        for j in range(domain.shape[1]-1):
+            ori[i,j] = domain[i,j]
+            t = 0
+            total = 0
+            if (domain[i,j] != domain[i,j+1]):
+                t+=1
+                total += domain[i,j+1]
+
+            if (domain[i,j] != domain[i,j-1]):
+                t+=1
+                total += domain[i,j-1]
+            if (domain[i,j] != domain[i+1,j]):
+                t+=1
+                total += domain[i+1,j]
+
+            if (domain[i,j] != domain[i-1,j]):
+                t+=1
+                total += domain[i-1,j]
+
+            if (domain[i,j] != domain[i+1,j+1]): 
+                t+=1
+                total += domain[i+1,j+1]
+
+            if (domain[i,j] != domain[i-1,j-1]):
+                t+=1
+                total += domain[i-1,j-1]
+
+            if (domain[i,j] != domain[i+1,j-1]): 
+                t+=1
+                total += domain[i+1,j-1]
+            if (domain[i,j] != domain[i-1,j+1]):
+                t+=1
+                total += domain[i-1,j+1]
+            if t > ths: 
+                #print(domain[i,j])
+                tmp[i,j] = 16 #int(total/10000)*16
+
+                #print('point fixed')
+
+    return(tmp,ori)
+
+
+def pressureDefT(topo):   
+    """
+    Identifiy windward and leeward grid for realistic irregular geometry.
+    """
+    def pressureDefPre(topo): # Count how much pb and pf was sampled from topo
+        pfNN = np.zeros(topo.shape[1])
+        pbNN = np.zeros(topo.shape[1])
+
+        for j in range(topo.shape[1]):
+            for i in range(topo.shape[0]):
+                try:
+                    if np.isnan(topo[i,j]) and ~np.isnan(topo[i-1,j]): # fontface
+                        pfNN[j] +=1
+                        #print('cao')
+                    if np.isnan(topo[i,j]) and ~np.isnan(topo[i+1,j]): # back face
+                        pbNN[j] +=1
+                except:
+                    0  
+        return(pfNN,pbNN)
+
+        
+    topo = np.transpose(topo)
+    pfNN,pbNN = pressureDefPre(topo)
+    
+    # Initialization
+    pf = []
+    pb = []
+    pfO = []
+    pbO = []
+    distO = []
+    pfN = 0
+    pbN = 0
+    dist = []
+    o1 = 0; o2 = 0; o3 = 0
+    for j in range(topo.shape[1]):
+        if ~np.isnan(topo[0,j]) and ~np.isnan(topo[-1,j]): # no B grid in the first and the end - normal row
+            for i in range(topo.shape[0]):
+                try:
+                    if np.isnan(topo[i,j]) and ~np.isnan(topo[i-1,j]): # fontface
+                        pf.append(topo[i-1,j])
+                        pfN += 1
+                        itmp = i
+                    if np.isnan(topo[i,j]) and ~np.isnan(topo[i+1,j]): # back face
+                        pb.append(topo[i+1,j])
+                        pbN += 1
+                        dist.append(i-itmp+1) # index of the paired pf and pb
+                except:
+                    0
+            
+        if ~np.isnan(topo[0,j]) and np.isnan(topo[-1,j]): # no B grid in the first but the end
+            count = 0
+            #print('Outlier 1 found at' + str(j) + ' th row')
+            o1+=1
+            for i in range(topo.shape[0]):
+
+                try:
+                    if np.isnan(topo[i,j]) and ~np.isnan(topo[i-1,j]): # fontface normal except for the last
+                        if  count == pfNN[j]-1: # if that's the last frontal face 
+                            
+                            pf.append(topo[i-1,j])
+                            pb.append(topo[0,j])
+                            pfN += 1
+                            pbN += 1
+                            dist.append(topo.shape[0]-i) # should be the length of the last continued building grids
+                            #print(topo.shape[0]-i)
+                            
+                        else:
+                            pf.append(topo[i-1,j])
+                            pfN += 1
+                            itmp = i
+                            count += 1              
+                    if np.isnan(topo[i,j]) and ~np.isnan(topo[i+1,j]): # back face normal
+                        pb.append(topo[i+1,j])
+                        pbN += 1
+                        dist.append(i-itmp+1) # index of the paired pf and pb
+                        
+                except:
+                    1
+                          
+        if np.isnan(topo[0,j]) and ~np.isnan(topo[-1,j]): # no B grid in the end but the first
+            
+            first = True
+            #print('Outlier 2 found at' + str(j) + ' th row')
+            o2+=1
+            
+            for i in range(topo.shape[0]):
+                try:
+                    if np.isnan(topo[i,j]) and ~np.isnan(topo[i-1,j]): # fontface normal
+                        #print('sampling pf'+str(i)+str(j))
+                        pf.append(topo[i-1,j])
+                        pfN += 1
+                        itmp = i
+                        
+                    if np.isnan(topo[i,j]) and ~np.isnan(topo[i+1,j]): # back face normal except for the first
+                        if first: 
+                            #print('sampling pb'+str(i)+str(j))
+                            pb.append(topo[i+1,j])
+                            pbN += 1
+                            dist.append(i) # grid count to the end - distance fixed
+                            first = False
+                        else:
+                            pb.append(topo[i+1,j])
+                            #print('sampling pb'+str(i)+str(j))
+                            pbN += 1
+                            dist.append(i-itmp+1) # index of the paired pf and pb     
+                except:
+                    2
+
+        if np.isnan(topo[0,j]) and np.isnan(topo[-1,j]): # B grid in the end and the first, record them in a seperate array
+            count = 0
+            first = True
+            o3+=1
+            #print('Outlier 3 found at' + str(j) + ' th row')
+            for i in range(topo.shape[0]):
+                
+                try:
+                    if np.isnan(topo[i,j]) and ~np.isnan(topo[i-1,j]): # fontface normal except for the last
+                        
+                        if  count == pfNN[j]-1: # if that's the last frontal face
+                            pfO.append(topo[i-1,j])
+                            upSize = topo.shape[0]-i
+                            
+                        else:
+                            pf.append(topo[i-1,j])
+                            pfN += 1
+                            itmp = i
+                            count += 1
+                except:
+                    3             
+            for i in range(topo.shape[0]):
+                try:
+                    if np.isnan(topo[i,j]) and ~np.isnan(topo[i+1,j]): # back face normal except for the first
+                        
+                        if first:
+                            #print('qppen')
+                            pbO.append(topo[i+1,j])
+                            lowSize = i
+                            distO.append(lowSize+upSize+1) # index of the paired pf and pb
+
+                            first = False
+                            
+                        else:
+                            pb.append(topo[i+1,j])
+                            pbN += 1
+                            dist.append(i-itmp+1) # index of the paired pf and pb
+                        
+                except:
+                    3
+    pf.extend(pfO)
+    pb.extend(pbO)
+    dist.extend(distO)              
+    return(np.array(pf),np.array(pb),np.array(dist))
